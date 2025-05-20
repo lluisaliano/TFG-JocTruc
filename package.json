@@ -1,0 +1,23 @@
+{
+	"name": "entorntruc",
+	"version": "1.0.0",
+	"description": "Enviroment to test truc games",
+	"license": "ISC",
+	"author": "Lluis",
+	"type": "module",
+	"main": "index.js",
+	"scripts": {
+		"watch": "tsx watch src/index.ts",
+		"dev": "tsx src/index.ts",
+		"build": "rimraf ./build && tsc",
+		"start": "npm run build && node build/index.js"
+	},
+	"dependencies": {
+		"readline-sync": "^1.4.10",
+		"tsx": "^4.19.3",
+		"typescript": "^5.8.3"
+	},
+	"devDependencies": {
+		"@types/node": "^22.15.20"
+	}
+}
