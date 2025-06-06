@@ -83,6 +83,7 @@ export interface GameState {
 	players: Players;
 	currentTurn: Player;
 	trucState: TrucState;
+	askedTruc: TrucState;
 	lap: number;
 	maPlayer: Player;
 	trucWonLaps: (Player | "tie")[];
@@ -92,7 +93,7 @@ export interface GameState {
 		player2: boolean;
 	};
 	playerThatAskedTruc: Player | null;
-	startingNewRound: () => boolean;
+	roundHasfinished: boolean;
 }
 
 export interface TieAndMaPlayer {

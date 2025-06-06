@@ -8,7 +8,7 @@
 	"main": "index.js",
 	"scripts": {
 		"watch": "tsx watch src/index.ts",
-		"dev": "tsx src/index.ts",
+		"dev": "tsx --max-old-space-size=8192 src/index.ts",
 		"build": "rimraf ./build && tsc",
 		"start": "npm run build && node build/index.js"
 	},

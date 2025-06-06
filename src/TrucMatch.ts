@@ -72,8 +72,16 @@ export class TrucMatch {
 	// Define 'ma' player of the round (The one who throws first card)
 	private roundMaPlayer: Player;
 
+	//FIXME THIS SHOULD BE DELETED
 	// This variable indicates if we are starting a new round, it will be set to false from the outside
 	private startingNewRound = false;
+
+	// This variable store if round is finished
+	private roundHasFinished = false;
+
+	// Round points and winner of the round
+	private roundPoints = 0;
+	private roundWinner: Player | null = null;
 
 	// Score
 	private score: Score = {
@@ -89,7 +97,7 @@ export class TrucMatch {
 	private readonly TIE = "tie";
 
 	// Truc score object
-	private readonly trucScore: Record<TrucState, number> = {
+	protected trucScore: Record<TrucState, number> = {
 		none: 1,
 		truc: 3,
 		retruc: 6,
@@ -151,6 +159,7 @@ export class TrucMatch {
 			players: this.players,
 			currentTurn: this.currentTurn,
 			trucState: this.trucState,
+			askedTruc: this.askedTruc,
 			lap: this.lap,
 			maPlayer: this.roundMaPlayer,
 			trucWonLaps: this.trucWonLaps,
@@ -160,11 +169,7 @@ export class TrucMatch {
 				player2: this.hasToAcceptTrucPlayer2,
 			},
 			playerThatAskedTruc: this.playerThatAskedTruc,
-			startingNewRound: () => {
-				const startingNewRound = this.startingNewRound;
-				this.newRoundStartedAcknowledged();
-				return startingNewRound;
-			},
+			roundHasfinished: this.roundHasFinished,
 		};
 		return status;
 	}
@@ -181,6 +186,14 @@ export class TrucMatch {
 				// If player has no turn, player cannot truc
 				if (player !== this.currentTurn) {
 					throw new Error("PLAYER HAS NO TURN TO TRUC");
+				}
+
+				if (this.hasToAcceptTrucPlayer1 === true && this.player1 === player) {
+					throw new Error("PLAYER HAS TO ACCEPT TRUC FIRST");
+				}
+
+				if (this.hasToAcceptTrucPlayer2 === true && this.player2 === player) {
+					throw new Error("PLAYER HAS TO ACCEPT TRUC FIRST");
 				}
 
 				// Assign hasToAcceptTruc to the other player
@@ -247,13 +260,14 @@ export class TrucMatch {
 					throw new Error("PLAYER HAS NO TURN TO ABANDON");
 				}
 
-				console.log(`Player ${player.userName} has abandoned the game`);
 
 				// Update Score
 				this.updateMatchScore("ABANDON");
 
 				// Start next round
-				this.startNextRound();
+				//this.startNextRound();
+				// Set roundHasFinished to true to notify that the round has finished
+				this.roundHasFinished = true;
 
 				return { type: "abandon", state: this.trucState };
 		}
@@ -312,7 +326,8 @@ export class TrucMatch {
 				// Update Score
 				this.updateMatchScore(roundState);
 
-				this.startNextRound();
+				//this.startNextRound();
+				this.roundHasFinished = true;
 				console.log("Starting next round");
 			}
 		}
@@ -402,7 +417,7 @@ export class TrucMatch {
 		return "CURRENT_ROUND_IS_NOT_FINISHED";
 	}
 
-	private startNextRound() {
+	startNextRound() {
 		// Before starting a new round, we must check if a player has won
 		// If a player has won, return that player
 		const isMatchOver = this.isMatchOver();
@@ -443,6 +458,11 @@ export class TrucMatch {
 
 		// Set startingNewRound to true to notify that we are starting a new round
 		this.startingNewRound = true;
+		// FIXME TOP LINE SHOUD BE CHANGED
+		this.roundHasFinished = false;
+
+		this.roundWinner = null;
+		this.roundPoints = 0;
 	}
 
 	/**
@@ -558,7 +578,20 @@ export class TrucMatch {
 			throw new Error("THERE IS NO WINNER PLAYER TO UPDATE MATCH SCORE");
 		}
 
-		// Finally, we update matchScore
+		// Finally, we update matchScore and corresponding variables (For CFR)
+		this.roundWinner = winnerPlayer;
+		// FIXME For the moment, this points are only used for CFR.
+		// Because of that, and because utility of truc is so high, we will low them down to avoid truc being so important.
+		const cfrTrucPoints = {
+			none: 1,
+			truc: 1.05,
+			retruc: 1.1,
+			val_9: 1.15,
+			cama: 1.2,
+		};
+
+		this.roundPoints = cfrTrucPoints[this.trucState];
+
 		const trucPoints: number = this.trucScore[this.trucState];
 		if (winnerPlayer === this.player1) {
 			this.score.player1 = this.score.player1 + trucPoints;
@@ -673,7 +706,210 @@ export class TrucMatch {
 		return this.players.findIndex((p) => p === player);
 	}
 
-	private newRoundStartedAcknowledged() {
-		this.startingNewRound = false;
+	/**
+	 * CFR Methods 
+	 * These methods are used to provide the necessary information
+	 * for CFR (Counterfactual Regret Minimization) algorithm.
+	 */
+	isRoundOver(): boolean {
+		// Comprova si ja s’han jugat 3 voltes o si hi ha abandonament. 
+		// Retorna true quan la mà estigui tancada, independentment del match global.
+		// Puedes reutilitzar internalmente el mateix que fas a playerPlay() quan detectes
+		// que lap>3 o que l’oponent ha abandonat.
+		if (this.roundHasFinished) {
+			return true;
+		}
+		return false;
 	}
+
+	// This method return true if state is terminal
+	isTerminal(): boolean {
+		return this.isRoundOver() !== false;
+	}
+
+	// This method returns the utility of the player in the current round
+	utility(playerIndex: number): number {
+		if (this.isRoundOver() === false) {
+			return 0; // No utility if match is not over
+		}
+
+		const winner = this.roundWinner;
+		if (!winner) {
+			return 0; // No utility if there is no winner
+		}
+
+		// Points of round are reduced in purpose to avoid truc being so important (Can be checked in updateMatchScore)
+		const points = this.roundPoints;
+
+		return winner.userName === this.players[playerIndex].userName ? +points : -points;
+	}
+
+	// This method returns the current player in turn (0 or 1)
+	currentPlayerIndex(): number {
+		if (this.currentTurn.userName === this.player1.userName) {
+			return 0;
+		} if (this.currentTurn.userName === this.player2.userName) {
+			return 1;
+		}
+		return -1;
+	}
+
+	/**
+	 * Aquesta funció genera una clau única per a l'informació del jugador
+	 * Te en compte els següents valors:
+	 *  	- playerIdx
+	 *		- hand: handIds
+	 *		- lap
+	 *		- trucState
+	 *		- mustAccept
+	 * 		- enemyPlayerThrownCards
+	 * D'aquesta forma, podem identificar la situació del jugador en el joc i reduir el nombre de nodes que hi ha a l'arbre del joc.
+	 * @param playerIdx 
+	 * @returns infoSetKey
+	 */
+	getInfoSetKey(playerIdx: number): string {
+		// Cartes a la mà del jugador actual
+		const player = this.players[playerIdx];
+		const handIds = player.cards.map((c) => c.id).sort();
+
+		// Volta actual i estat de truc
+		const lap = this.lap;
+		const trucState = this.trucState;
+
+		const enemyPlayerThrownCards = this.players[1 - playerIdx].thrownCards.sort();
+
+		// Constant que diu si el jugador ha d'acceptar un truc
+		const mustAccept =
+			playerIdx === 0 ? this.hasToAcceptTrucPlayer1 : this.hasToAcceptTrucPlayer2;
+
+		// Construïm un objecte i el pasem a JSON
+		const infoSet = {
+			playerIdx,
+			hand: handIds,
+			lap,
+			trucState,
+			mustAccept,
+			enemyPlayerThrownCards,
+		};
+		return JSON.stringify(infoSet);
+	}
+
+
+	getActions(playerIdx: number): Array<Card | CallType> {
+		const out: Array<Card | CallType> = [];
+		// Si no és el seu torn, no té cap acció
+		if (this.currentPlayerIndex() !== playerIdx) {
+			return out;
+		}
+
+		// Si està obligat a aceptar el truc, aceptar i abandonar són les úniques accions possibles
+		const mustAccept =
+			playerIdx === 0 ? this.hasToAcceptTrucPlayer1 : this.hasToAcceptTrucPlayer2;
+		if (mustAccept) {
+			out.push("acceptTruc");
+			out.push("abandonar");
+			return out;
+		}
+
+		// Si no el jugador no ha trucat i l’estat del truc no és “cama”, pot demanar “truc”
+		const player = this.players[playerIdx];
+		const iAsked = this.playerThatAskedTruc?.userName === player.userName;
+		if (!iAsked && this.trucState !== "cama") {
+			out.push("truc");
+		}
+
+		// Pot jugar qualsevol carta que tingui a la mà
+		for (const c of player.cards) {
+			out.push(c);
+		}
+
+		return out;
+	}
+
+	// Creem una copia de la partida actual
+	// Aquesta funció és necessària per al CFR, per tal de poder fer simulacions sense modificar l'estat original
+	clone(): TrucMatch {
+		const copy = Object.create(TrucMatch.prototype) as TrucMatch;
+		// Constants
+		copy.trucScore = {
+			none: 1,
+			truc: 3,
+			retruc: 6,
+			val_9: 9,
+			cama: this.WIN_SCORE,
+		};
+
+		// Copiem els jugadors i les seves cartes
+		copy.players = this.players.map((p) => ({
+			userName: p.userName,
+			cards: [...p.cards.map((c) => ({ ...c }))],
+			thrownCards: [...p.thrownCards.map((c) => ({ ...c }))],
+		}));
+		copy.player1 = copy.players[0];
+		copy.player2 = copy.players[1];
+
+		// Copiem l'estat del truc
+		copy.trucState = this.trucState;
+		copy.askedTruc = this.askedTruc;
+
+		if (this.playerThatAskedTruc) {
+			copy.playerThatAskedTruc = copy.player1.userName === this.playerThatAskedTruc.userName
+				? copy.player1
+				: copy.player2;
+		} else {
+			copy.playerThatAskedTruc = null;
+		}
+		copy.hasToAcceptTrucPlayer1 = this.hasToAcceptTrucPlayer1;
+		copy.hasToAcceptTrucPlayer2 = this.hasToAcceptTrucPlayer2;
+
+		// Copiem l'estat de les laps de la partida
+		copy.lap = this.lap;
+		copy.trucWonLaps = this.trucWonLaps.map((lapWinner) => {
+			if (typeof lapWinner === "string" && lapWinner === this.TIE) {
+				return copy.TIE;
+			}
+			if (lapWinner === this.player1) {
+				return copy.player1;
+			}
+			return copy.player2;
+		});
+
+		// Reconstruïm les l'ordre dels torns amb la mateixa posició de jugador que es ma
+		const maIdx = this.roundMaPlayer.userName === this.player1.userName ? 0 : 1;
+		copy.roundInfiniteQueue = new InfiniteQueue(copy.players, maIdx);
+		copy.roundMaPlayer = copy.players[maIdx];
+		copy.turnQueue = new Queue(copy.players, maIdx);
+
+		// Assignem el torn actual
+		const currentTurnUserName = this.currentTurn.userName;
+
+		if (this.player1.userName === currentTurnUserName) {
+			copy.currentTurn = copy.player1;
+		} else {
+			copy.currentTurn = copy.player2;
+		}
+
+		// Copiem la puntuació
+		copy.score = { player1: this.score.player1, player2: this.score.player2 };
+
+		// Copiem variables per gestionar els algorismes del CFR #TODO Aquestes variables es podrien eliminar
+		copy.startingNewRound = this.startingNewRound;
+		copy.roundWinner = this.roundWinner;
+		copy.roundPoints = this.roundPoints;
+
+		return copy;
+	}
+
+	// Realitzar una acció en la partida, ja sigui trucar o jugar una carta
+	applyAction(action: Card | CallType, playerName: string): void {
+		const meIdx = this.currentPlayerIndex();
+
+		// Utilitzem el tipus de l'acció per determinar que hi ha que fer
+		if (typeof action === "string") {
+			this.playerCall(playerName, action);
+		} else {
+			this.playerPlay(playerName, action);
+		}
+	}
+
 }
